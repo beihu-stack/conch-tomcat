@@ -15,9 +15,15 @@
 	<properties>
 		<revision>1.0.0</revision>
 
+		<!-- project -->
 		<main.user.dir>${basedir}</main.user.dir>
 		<java.version>17</java.version>
 		<project.encoding>UTF-8</project.encoding>
+
+		<!-- infrastructure -->
+		<jakarta.servlet.version>6.0.0</jakarta.servlet.version>
+
+		<!-- common -->
 
 		<!--maven plugin-->
 		<maven.staging.plugin>1.6.7</maven.staging.plugin>
@@ -30,8 +36,18 @@
 	</properties>
 
 	<modules>
-
+		<module>conch-tomcat-core</module>
 	</modules>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>jakarta.servlet</groupId>
+				<artifactId>jakarta.servlet-api</artifactId>
+				<version>${jakarta.servlet.version}</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<build>
 		<plugins>
