@@ -47,20 +47,26 @@ public interface Log {
     boolean isWarnEnabled();
 
     void trace(Object message);
+
     void trace(Object message, Throwable e);
 
     void debug(Object message);
+
     void debug(Object message, Throwable e);
 
     void info(Object message);
+
     void info(Object message, Throwable e);
 
     void warn(Object message);
+
     void warn(Object message, Throwable e);
 
     void error(Object message);
+
     void error(Object message, Throwable e);
 
     void fatal(Object message);
+
     void fatal(Object message, Throwable e);
 }
