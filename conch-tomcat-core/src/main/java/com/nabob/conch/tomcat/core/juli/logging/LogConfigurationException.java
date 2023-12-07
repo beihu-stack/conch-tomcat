@@ -1,4 +1,4 @@
-package com.nabob.conch.tomcat.core.juli;
+package com.nabob.conch.tomcat.core.juli.logging;
 
 /**
  * Log Configuration Exception

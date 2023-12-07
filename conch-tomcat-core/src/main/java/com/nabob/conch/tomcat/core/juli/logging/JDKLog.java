@@ -1,4 +1,4 @@
-package com.nabob.conch.tomcat.core.juli;
+package com.nabob.conch.tomcat.core.juli.logging;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;
