@@ -2,6 +2,7 @@ package com.nabob.conch.tomcat.core.juli;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Handler;
 import java.util.logging.LogManager;
@@ -74,6 +75,23 @@ import java.util.logging.Logger;
  * @since 2023/12/7
  */
 public class ClassLoaderLogManager extends LogManager {
+
+    /**
+     * 根据不同的ClassLoader，加载对应的日志信息
+     * 使用 WeakHashMap 避免应用重新部署导致的 ClassLoader引用泄露
+     */
+    protected final Map<ClassLoader, ClassLoaderLogInfo> classLoaderLoggers = new WeakHashMap<>();
+
+    /**
+     * 覆盖 addLogger 方法
+     * <p>
+     * synchronized 线程安全的，必须
+     * 原LogManager的addLogger内部也使用了synchronized以保障LogManager的线程安全
+     */
+    @Override
+    public synchronized boolean addLogger(Logger logger) {
+
+    }
 
     // ---------------------------------------------------- LogNode Inner Class
 
