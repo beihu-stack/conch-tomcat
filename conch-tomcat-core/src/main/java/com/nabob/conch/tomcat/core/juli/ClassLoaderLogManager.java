@@ -1,5 +1,12 @@
 package com.nabob.conch.tomcat.core.juli;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -90,8 +97,57 @@ public class ClassLoaderLogManager extends LogManager {
      */
     @Override
     public synchronized boolean addLogger(Logger logger) {
-
+        // todo impl
+        return false;
     }
+
+    // ------------------------------------------------------ Protected Methods
+
+
+    /**
+     * 读取 日志配置 for the specified classloader
+     */
+    protected synchronized void readConfiguration(ClassLoader classLoader) {
+
+        // 获取配置文件资源
+        InputStream is = null;
+
+        try {
+            if (classLoader instanceof URLClassLoader) {
+                URL logConfig = ((URLClassLoader) classLoader).findResource("logging.properties");
+                if (null != logConfig) {
+                    is = classLoader.getResourceAsStream("logging.properties");
+                }
+            }
+        } catch (Exception e) {
+            // can log, if have Logger
+        }
+
+        // 未获取配置文件资源，尝试从 java.util.logging.config.file 获取
+        if (is == null && classLoader == ClassLoader.getSystemClassLoader()) {
+            String configFileStr = System.getProperty("java.util.logging.config.file");
+            if (configFileStr != null) {
+                try {
+                    is = new FileInputStream(configFileStr);
+                } catch (FileNotFoundException e) {
+                    System.err.println("Configuration error");
+                    e.printStackTrace();
+                }
+            }
+
+            // 尝试使用JVM默认配置
+            if (is == null) {
+                File defaultFile = new File(new File(System.getProperty("java.home"), "conf"), "logging.properties");
+                try {
+                    is = new FileInputStream(defaultFile);
+                } catch (IOException e) {
+                    System.err.println("Configuration error");
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
 
     // ---------------------------------------------------- LogNode Inner Class
 
