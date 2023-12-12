@@ -9,6 +9,8 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
+import java.util.StringTokenizer;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Handler;
@@ -21,6 +23,10 @@ import java.util.logging.Logger;
  * <h3>ClassLoader LogManager</h3>
  * - 根据不同的ClassLoader，加载对应的日志信息
  * - -Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager
+ * <p>
+ * Why：
+ * - Apache Tomcat 提供了一个可识别类加载器的自定义 LogManager。这样做是为了避免日志混淆的问题，即多个 Web 应用程序（每个应用程序都有自己的类加载器）创建具有相同名称的记录器。
+ * - 自定义 LogManager 还允许创建同一 Handler 类的多个实例。它通过在处理程序类名中添加数字前缀来实现此目的。因此，它以不同的方式对待“handlers”和“.handlers”属性。第一个定义所有处理程序，第二个定义根记录器的处理程序。
  * <p>
  * 架构：
  * ClassLoader -> ClassLoaderLogInfo
@@ -67,7 +73,7 @@ import java.util.logging.Logger;
  * 可以在命令行上将这两个系统属性指定为“java”命令，或者作为传递给JNI_CreateJavaVM的系统属性定义。
  * 记录器和处理程序的properties将具有以处理程序或记录器的点分隔名称开头的名称。
  * 全局日志记录属性可能包括：
- *      属性“处理程序”。 这为处理程序类定义了一个以空格或逗号分隔的类名列表，以便在根Logger（名为“”的Logger）上加载和注册为处理程序。 每个类名必须是具有默认构造函数的Handler类。 请注意，这些处理程序可能会在首次使用时延迟创建。
+ *      属性“handlers” 这为处理程序类定义了一个以空格或逗号分隔的类名列表，以便在根Logger（名为“”的Logger）上加载和注册为处理程序。 每个类名必须是具有默认构造函数的Handler类。 请注意，这些处理程序可能会在首次使用时延迟创建。
  *      属性“<logger> .handlers”。 这为处理程序类定义了一个以空格或逗号分隔的类名列表，以便加载和注册为指定记录程序的处理程序。 每个类名必须是具有默认构造函数的Handler类。 请注意，这些处理程序可能会在首次使用时延迟创建。
  *      属性“<logger> .handlers.ensureCloseOnReset”。 这定义了一个布尔值。 如果未定义“<logger> .handlers”或为空，则忽略此属性。 否则默认为true 。 当值为true ，保证在reset()关闭与记录器关联的处理程序并关闭。 可以通过在配置中显式设置“<logger> .handlers.ensureCloseOnReset = false”来关闭此功能。 请注意，关闭此属性会导致引入资源泄漏的风险，因为在调用reset()之前，记录器可能会收集垃圾，从而阻止其处理程序在reset()上关闭。 在这种情况下，应用程序有责任确保在记录器被垃圾收集之前关闭处理程序。
  *      属性“<logger> .useParentHandlers”。 这定义了一个布尔值。 默认情况下，除了处理日志消息本身之外，每个记录器都会调用其父记录，这通常也会导致消息由根记录器处理。 将此属性设置为false时，需要为此记录器配置Handler，否则不会传递任何记录消息。
@@ -82,6 +88,8 @@ import java.util.logging.Logger;
  * @since 2023/12/7
  */
 public class ClassLoaderLogManager extends LogManager {
+
+    private static ThreadLocal<Boolean> addingLocalRootLogger = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     /**
      * 根据不同的ClassLoader，加载对应的日志信息
@@ -101,13 +109,58 @@ public class ClassLoaderLogManager extends LogManager {
         return false;
     }
 
+    /**
+     * 覆盖 获取日志 配置方法
+     */
+    @Override
+    public void readConfiguration() throws IOException, SecurityException {
+        readConfiguration(getClassLoader());
+    }
+
+    /**
+     * 覆盖 获取日志 配置方法
+     * <p>
+     * 从文件获取配置时，需重置当前Logger的配置
+     */
+    @Override
+    public void readConfiguration(InputStream ins) throws IOException, SecurityException {
+        readConfiguration(ins, getClassLoader());
+    }
+
+    @Override
+    public synchronized void reset() throws SecurityException {
+        // todo impl
+        super.reset();
+    }
+
     // ------------------------------------------------------ Protected Methods
 
+    /**
+     * 根据ClassLoader 获取 日志信息
+     */
+    protected synchronized ClassLoaderLogInfo getClassLoaderInfo(ClassLoader classLoader) {
+
+        if (classLoader == null) {
+            classLoader = this.getClass().getClassLoader();
+        }
+
+        ClassLoaderLogInfo classLoaderLogInfo = classLoaderLoggers.get(classLoader);
+        if (classLoaderLogInfo == null) {
+            try {
+                readConfiguration(classLoader);
+            } catch (IOException e) {
+                // do nothing
+            }
+            classLoaderLogInfo = classLoaderLoggers.get(classLoader);
+        }
+
+        return classLoaderLogInfo;
+    }
 
     /**
      * 读取 日志配置 for the specified classloader
      */
-    protected synchronized void readConfiguration(ClassLoader classLoader) {
+    protected synchronized void readConfiguration(ClassLoader classLoader) throws IOException {
 
         // 获取配置文件资源
         InputStream is = null;
@@ -146,8 +199,106 @@ public class ClassLoaderLogManager extends LogManager {
                 }
             }
         }
+
+        // rootLogger
+        Logger rootLogger = new RootLogger();
+        if (is == null) {
+            // 检索 父classLoader的 root logger
+            ClassLoader current = classLoader.getParent();
+            ClassLoaderLogInfo info = null;
+            while (current != null && info == null) {
+                info = getClassLoaderInfo(current);
+                current = current.getParent();
+            }
+            if (info != null) {
+                // 作为 rootLogger 的 parent
+                rootLogger.setParent(info.rootNode.logger);
+            }
+        }
+
+        // 创建 ClassLoaderLogInfo， 用于维护日志信息
+        ClassLoaderLogInfo classLoaderLogInfo = new ClassLoaderLogInfo(new LogNode(null, rootLogger));
+        classLoaderLoggers.put(classLoader, classLoaderLogInfo);
+
+        // 读取配置文件，加载到 ClassLoaderLogInfo 中
+        if (is != null) {
+            readConfiguration(is, classLoader);
+        }
+
+        try {
+            // Use a ThreadLocal to work around
+            // https://bugs.openjdk.java.net/browse/JDK-8195096
+            addingLocalRootLogger.set(Boolean.TRUE);
+            addLogger(rootLogger);
+        } finally {
+            addingLocalRootLogger.set(Boolean.FALSE);
+        }
     }
 
+    /**
+     * 读取 日志配置 for the specified classloader with InputStream resource
+     */
+    protected synchronized void readConfiguration(InputStream is, ClassLoader classLoader) throws IOException {
+        ClassLoaderLogInfo classLoaderLogInfo = classLoaderLoggers.get(classLoader);
+
+        // 加载配置
+        try {
+            classLoaderLogInfo.props.load(is);
+        } catch (IOException e) {
+            System.err.println("Configuration error");
+            e.printStackTrace();
+        } finally {
+            try {
+                is.close();
+            } catch (IOException ioe) {
+                // do nothing
+            }
+        }
+
+        Logger rootLogger = classLoaderLogInfo.rootNode.logger;
+
+        // 未这个classLoader的 root logger 创建 handlers
+        String rootHandlers = classLoaderLogInfo.props.getProperty(".handlers");
+        String handlers = classLoaderLogInfo.props.getProperty("handlers");
+
+        if (handlers != null) {
+            StringTokenizer handlersTok = new StringTokenizer(handlers, ",");
+            while (handlersTok.hasMoreTokens()) {
+                String handlerName = handlersTok.nextToken().trim();
+
+                // 解析真正的Handler Class Name
+                String handlerClassName = handlerName;
+                String prefix = "";
+                if (handlerClassName.length() <= 0) {
+                    continue;
+                }
+                if (Character.isDigit(handlerClassName.charAt(0))) {
+                    int pos = handlerClassName.indexOf('.');
+                    if (pos >= 0) {
+                        prefix = handlerClassName.substring(0, pos + 1);
+                        handlerClassName = handlerClassName.substring(pos + 1);
+                    }
+                }
+
+                // 加载Handler Class
+                try {
+                    Handler handler = (Handler) classLoader.loadClass(handlerClassName).getConstructor().newInstance();
+                    // key : handlerName
+                    classLoaderLogInfo.handlers.put(handlerName, handler);
+
+                    // 兼容
+                    if (rootHandlers == null) {
+                        rootLogger.addHandler(handler);
+                    }
+
+                } catch (Exception e) {
+                    System.err.println("Handler error");
+                    e.printStackTrace();
+                }
+            }
+        }
+
+    }
 
     // ---------------------------------------------------- LogNode Inner Class
 
@@ -214,17 +365,43 @@ public class ClassLoaderLogManager extends LogManager {
 
     // -------------------------------------------- ClassLoaderInfo Inner Class
 
+    /**
+     * 管理 LogInfo
+     */
     protected static final class ClassLoaderLogInfo {
 
         final LogNode rootNode;
 
         final Map<String, Logger> loggers = new ConcurrentHashMap<>();
 
+        // 配置文件中的 Handler，使用: handlers = 1catalina.org.apache.juli.AsyncFileHandler, 2localhost.org.apache.juli.AsyncFileHandler  配置
         final Map<String, Handler> handlers = new HashMap<>();
+
+        // 用于加载 Properties 资源： 日志配置文件；每个 ClassLoaderLogInfo 对象，可加载自己的配置
+        final Properties props = new Properties();
 
         ClassLoaderLogInfo(LogNode rootNode) {
             this.rootNode = rootNode;
         }
     }
 
+    /**
+     * 获取 ClassLoader，优先使用线程上下文
+     */
+    static ClassLoader getClassLoader() {
+        ClassLoader result = Thread.currentThread().getContextClassLoader();
+        if (result == null) {
+            result = ClassLoaderLogManager.class.getClassLoader();
+        }
+        return result;
+    }
+
+    /**
+     * 用于初始化每个ClassLoader层次机构的根
+     */
+    protected static class RootLogger extends Logger {
+        public RootLogger() {
+            super("", null);
+        }
+    }
 }
