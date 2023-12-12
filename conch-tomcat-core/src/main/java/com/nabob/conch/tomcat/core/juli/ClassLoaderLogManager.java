@@ -14,6 +14,7 @@ import java.util.StringTokenizer;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Handler;
+import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
@@ -104,9 +105,81 @@ public class ClassLoaderLogManager extends LogManager {
      * 原LogManager的addLogger内部也使用了synchronized以保障LogManager的线程安全
      */
     @Override
-    public synchronized boolean addLogger(Logger logger) {
-        // todo impl
-        return false;
+    public synchronized boolean addLogger(final Logger logger) {
+        final String loggerName = logger.getName();
+        ClassLoader classLoader = getClassLoader();
+        ClassLoaderLogInfo classLoaderInfo = getClassLoaderInfo(classLoader);
+
+        if (classLoaderInfo.loggers.containsKey(loggerName)) {
+            return false;
+        }
+        classLoaderInfo.loggers.put(loggerName, logger);
+
+        // 为logger配置日志级别；rootLogger的loggerName是 ""， 所以配置文件中的 .level 将是rootLogger的配置级别
+        final String levelString = getProperty(loggerName + ".level");
+        if (levelString != null) {
+            try {
+                logger.setLevel(Level.parse(levelString.trim()));
+            } catch (IllegalArgumentException e) {
+                // Leave level set to null
+            }
+        }
+
+        // 初始化 父Logger
+        int dotIndex = loggerName.lastIndexOf('.');
+        if (dotIndex >= 0) {
+            final String parentName = loggerName.substring(0, dotIndex);
+            Logger.getLogger(parentName);
+        }
+
+        // 查询or创建LogNode
+        LogNode node = classLoaderInfo.rootNode.findNode(loggerName);
+        node.logger = logger;
+
+        // Set parent logger
+        Logger parentLogger = node.findParentLogger();
+        if (parentLogger != null) {
+            doSetParentLogger(logger, parentLogger);
+        }
+
+        // Tell children we are their new parent
+        node.setParentLogger(logger);
+
+        // Add associated handlers, if any are defined using the .handlers property.
+        // In this case, handlers of the parent logger(s) will not be used
+        String handlers = getProperty(loggerName + ".handlers");
+        if (handlers != null) {
+            logger.setUseParentHandlers(false);
+            StringTokenizer tok = new StringTokenizer(handlers, ",");
+            while (tok.hasMoreTokens()) {
+                String handlerName = (tok.nextToken().trim());
+                Handler handler = null;
+                ClassLoader current = classLoader;
+                while (current != null) {
+                    classLoaderInfo = classLoaderLoggers.get(current);
+                    if (classLoaderInfo != null) {
+                        handler = classLoaderInfo.handlers.get(handlerName);
+                        if (handler != null) {
+                            break;
+                        }
+                    }
+                    current = current.getParent();
+                }
+                if (handler != null) {
+                    logger.addHandler(handler);
+                }
+            }
+        }
+
+        // Parse useParentHandlers to set if the logger should delegate to its parent.
+        // Unlike java.util.logging, the default is to not delegate if a list of handlers
+        // has been specified for the logger.
+        String useParentHandlersString = getProperty(loggerName + ".useParentHandlers");
+        if (Boolean.parseBoolean(useParentHandlersString)) {
+            logger.setUseParentHandlers(true);
+        }
+
+        return true;
     }
 
     /**
@@ -126,6 +199,66 @@ public class ClassLoaderLogManager extends LogManager {
     public void readConfiguration(InputStream ins) throws IOException, SecurityException {
         readConfiguration(ins, getClassLoader());
     }
+
+    @Override
+    public String getProperty(String name) {
+
+        // Use a ThreadLocal to work around
+        // https://bugs.openjdk.java.net/browse/JDK-8195096
+        if (".handlers".equals(name) && !addingLocalRootLogger.get().booleanValue()) {
+            return null;
+        }
+
+//        String prefix = this.prefix.get();
+        String result = null;
+
+        // If a prefix is defined look for a prefixed property first
+//        if (prefix != null) {
+//            result = findProperty(prefix + name);
+//        }
+
+        // If there is no prefix or no property match with the prefix try just
+        // the name
+        if (result == null) {
+            result = findProperty(name);
+        }
+
+        // Simple property replacement (mostly for folder names)
+//        if (result != null) {
+//            result = replace(result);
+//        }
+        return result;
+    }
+
+
+    private synchronized String findProperty(String name) {
+        ClassLoader classLoader = getClassLoader();
+        ClassLoaderLogInfo info = getClassLoaderInfo(classLoader);
+        String result = info.props.getProperty(name);
+        // If the property was not found, and the current classloader had no
+        // configuration (property list is empty), look for the parent classloader
+        // properties.
+        if ((result == null) && (info.props.isEmpty())) {
+            if (classLoader != null) {
+                ClassLoader current = classLoader.getParent();
+                while (current != null) {
+                    info = classLoaderLoggers.get(current);
+                    if (info != null) {
+                        result = info.props.getProperty(name);
+                        if ((result != null) || (!info.props.isEmpty())) {
+                            break;
+                        }
+                    }
+                    current = current.getParent();
+                }
+            }
+            if (result == null) {
+                result = super.getProperty(name);
+            }
+        }
+        return result;
+    }
+
 
     @Override
     public synchronized void reset() throws SecurityException {
@@ -166,6 +299,9 @@ public class ClassLoaderLogManager extends LogManager {
         InputStream is = null;
 
         try {
+
+            // todo WebappProperties，在web应用程序中，项目将会使用WEB-INF/classes/logging.properties日志配置文件
+
             if (classLoader instanceof URLClassLoader) {
                 URL logConfig = ((URLClassLoader) classLoader).findResource("logging.properties");
                 if (null != logConfig) {
@@ -190,6 +326,7 @@ public class ClassLoaderLogManager extends LogManager {
 
             // 尝试使用JVM默认配置
             if (is == null) {
+                // jdk11后放在conf目录下
                 File defaultFile = new File(new File(System.getProperty("java.home"), "conf"), "logging.properties");
                 try {
                     is = new FileInputStream(defaultFile);
@@ -268,14 +405,14 @@ public class ClassLoaderLogManager extends LogManager {
 
                 // 解析真正的Handler Class Name
                 String handlerClassName = handlerName;
-                String prefix = "";
+//                String prefix = "";
                 if (handlerClassName.length() <= 0) {
                     continue;
                 }
                 if (Character.isDigit(handlerClassName.charAt(0))) {
                     int pos = handlerClassName.indexOf('.');
                     if (pos >= 0) {
-                        prefix = handlerClassName.substring(0, pos + 1);
+//                        prefix = handlerClassName.substring(0, pos + 1);
                         handlerClassName = handlerClassName.substring(pos + 1);
                     }
                 }
@@ -361,17 +498,44 @@ public class ClassLoaderLogManager extends LogManager {
 
             return currentNode;
         }
+
+        Logger findParentLogger() {
+            Logger logger = null;
+            LogNode node = parent;
+            while (node != null && logger == null) {
+                logger = node.logger;
+                node = node.parent;
+            }
+            return logger;
+        }
+
+        void setParentLogger(final Logger parent) {
+            for (final LogNode childNode : children.values()) {
+                if (childNode.logger == null) {
+                    childNode.setParentLogger(parent);
+                } else {
+                    doSetParentLogger(childNode.logger, parent);
+                }
+            }
+        }
+    }
+
+    protected static void doSetParentLogger(final Logger logger, final Logger parent) {
+        logger.setParent(parent);
     }
 
     // -------------------------------------------- ClassLoaderInfo Inner Class
 
     /**
-     * 管理 LogInfo
+     * 管理 LogInfo，每个ClassLoader对应一个ClassLoaderLogInfo
+     * <p>
+     * 这样做是为了避免日志混淆的问题，即多个 Web 应用程序（每个应用程序都有自己的类加载器）创建具有相同名称的记录器。
      */
     protected static final class ClassLoaderLogInfo {
 
         final LogNode rootNode;
 
+        // 重写LogManager的addLogger方法后，统一管理在这个Map中
         final Map<String, Logger> loggers = new ConcurrentHashMap<>();
 
         // 配置文件中的 Handler，使用: handlers = 1catalina.org.apache.juli.AsyncFileHandler, 2localhost.org.apache.juli.AsyncFileHandler  配置
