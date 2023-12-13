@@ -1,109 +1,133 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-	<modelVersion>4.0.0</modelVersion>
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
 
-	<groupId>com.nabob.conch</groupId>
-	<artifactId>conch-tomcat</artifactId>
-	<version>${revision}</version>
+  <groupId>com.nabob.conch</groupId>
+  <artifactId>conch-tomcat</artifactId>
+  <version>${revision}</version>
 
-	<packaging>pom</packaging>
+  <packaging>pom</packaging>
 
-	<name>conch-tomcat</name>
-	<description>conch-tomcat</description>
+  <name>conch-tomcat</name>
+  <description>conch-tomcat</description>
 
-	<properties>
-		<revision>1.0.0</revision>
+  <properties>
+    <revision>1.0.0</revision>
 
-		<!-- project -->
-		<main.user.dir>${basedir}</main.user.dir>
-		<java.version>17</java.version>
-		<project.encoding>UTF-8</project.encoding>
+    <!-- project -->
+    <main.user.dir>${basedir}</main.user.dir>
+    <java.version>17</java.version>
+    <project.encoding>UTF-8</project.encoding>
 
-		<!-- infrastructure -->
-		<jakarta.servlet.version>6.0.0</jakarta.servlet.version>
+    <!-- infrastructure -->
+    <jakarta.servlet.version>6.0.0</jakarta.servlet.version>
 
-		<!-- common -->
+    <!-- common -->
+    <jackson-version>2.10.3</jackson-version>
 
-		<!--maven plugin-->
-		<maven.staging.plugin>1.6.7</maven.staging.plugin>
-		<maven.gpg.pluign>1.6</maven.gpg.pluign>
-		<flatten-maven-plugin.version>1.2.7</flatten-maven-plugin.version>
-		<maven.deploy.plugin.version>2.8.2</maven.deploy.plugin.version>
-		<license.maven.plugin>3.0</license.maven.plugin>
-		<maven.java.formatter.plugin>0.4</maven.java.formatter.plugin>
-		<maven.compiler.plugin>3.1</maven.compiler.plugin>
-	</properties>
+    <!--maven plugin-->
+    <maven.staging.plugin>1.6.7</maven.staging.plugin>
+    <maven.gpg.pluign>1.6</maven.gpg.pluign>
+    <flatten-maven-plugin.version>1.2.7</flatten-maven-plugin.version>
+    <maven.deploy.plugin.version>2.8.2</maven.deploy.plugin.version>
+    <license.maven.plugin>3.0</license.maven.plugin>
+    <maven.java.formatter.plugin>0.4</maven.java.formatter.plugin>
+    <maven.compiler.plugin>3.1</maven.compiler.plugin>
+  </properties>
 
-	<modules>
-		<module>conch-tomcat-core</module>
-	</modules>
+  <modules>
+    <module>conch-tomcat-core</module>
+  </modules>
 
-	<dependencyManagement>
-		<dependencies>
-			<dependency>
-				<groupId>jakarta.servlet</groupId>
-				<artifactId>jakarta.servlet-api</artifactId>
-				<version>${jakarta.servlet.version}</version>
-			</dependency>
-		</dependencies>
-	</dependencyManagement>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>jakarta.servlet</groupId>
+        <artifactId>jakarta.servlet-api</artifactId>
+        <version>${jakarta.servlet.version}</version>
+      </dependency>
 
-	<build>
-		<plugins>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-deploy-plugin</artifactId>
-				<version>${maven.deploy.plugin.version}</version>
-				<configuration>
-					<skip>true</skip>
-				</configuration>
-			</plugin>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-compiler-plugin</artifactId>
-				<version>${maven.compiler.plugin}</version>
-				<configuration>
-					<encoding>${project.encoding}</encoding>
-					<source>${java.version}</source>
-					<target>${java.version}</target>
-				</configuration>
-			</plugin>
-			<plugin>
-				<groupId>org.codehaus.mojo</groupId>
-				<artifactId>flatten-maven-plugin</artifactId>
-				<version>${flatten-maven-plugin.version}</version>
-				<configuration>
-					<updatePomFile>true</updatePomFile>
-					<flattenMode>resolveCiFriendliesOnly</flattenMode>
-				</configuration>
-				<executions>
-					<execution>
-						<id>flatten</id>
-						<phase>process-resources</phase>
-						<goals>
-							<goal>flatten</goal>
-						</goals>
-					</execution>
-					<execution>
-						<id>flatten.clean</id>
-						<phase>clean</phase>
-						<goals>
-							<goal>clean</goal>
-						</goals>
-					</execution>
-				</executions>
-			</plugin>
-		</plugins>
-		<pluginManagement>
-			<plugins>
-				<plugin>
-					<groupId>org.codehaus.mojo</groupId>
-					<artifactId>flatten-maven-plugin</artifactId>
-					<version>${flatten-maven-plugin.version}</version>
-				</plugin>
-			</plugins>
-		</pluginManagement>
-	</build>
+      <!-- jackson-->
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-core</artifactId>
+        <version>${jackson-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-annotations</artifactId>
+        <version>${jackson-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.datatype</groupId>
+        <artifactId>jackson-datatype-jsr310</artifactId>
+        <version>${jackson-version}</version>
+      </dependency>
+
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-deploy-plugin</artifactId>
+        <version>${maven.deploy.plugin.version}</version>
+        <configuration>
+          <skip>true</skip>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${maven.compiler.plugin}</version>
+        <configuration>
+          <encoding>${project.encoding}</encoding>
+          <source>${java.version}</source>
+          <target>${java.version}</target>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+        <version>${flatten-maven-plugin.version}</version>
+        <configuration>
+          <updatePomFile>true</updatePomFile>
+          <flattenMode>resolveCiFriendliesOnly</flattenMode>
+        </configuration>
+        <executions>
+          <execution>
+            <id>flatten</id>
+            <phase>process-resources</phase>
+            <goals>
+              <goal>flatten</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>flatten.clean</id>
+            <phase>clean</phase>
+            <goals>
+              <goal>clean</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>flatten-maven-plugin</artifactId>
+          <version>${flatten-maven-plugin.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
 
 </project>
