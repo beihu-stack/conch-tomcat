@@ -1,7 +1,24 @@
 package com.nabob.conch.tomcat.core.juli;
 
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.Charset;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Path;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.logging.ErrorManager;
 import java.util.logging.Filter;
+import java.util.logging.Formatter;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogManager;
@@ -19,6 +36,13 @@ public class FileHandler extends Handler {
     // 永久
     public static final int DEFAULT_MAX_DAYS = -1;
     public static final int DEFAULT_BUFFER_SIZE = -1;
+
+    /**
+     * 日志是否可滚动
+     * <p>
+     * 默认为True
+     */
+    private Boolean rotatable;
 
     /**
      * 日志存储的目录
@@ -44,9 +68,25 @@ public class FileHandler extends Handler {
     private Integer maxDays;
 
     /**
-     * 日志Buffer大小
+     * 日志写入Buffer大小
      */
     private Integer bufferSize;
+
+    /**
+     * 当前日志文件的日期，未null表示没有日志文件
+     * <p>
+     * 格式：yyyy-MM-dd
+     */
+    private volatile String date = null;
+
+    /**
+     * 写日志 Writer
+     */
+    private volatile PrintWriter writer = null;
+    /**
+     * 写日志 Writer 锁
+     */
+    protected final ReadWriteLock writerLock = new ReentrantReadWriteLock();
 
     public FileHandler() {
         configure();
@@ -54,6 +94,62 @@ public class FileHandler extends Handler {
 
     @Override
     public void publish(LogRecord record) {
+        // 是否可打日志，内部运行filter
+        if (!isLoggable(record)) {
+            return;
+        }
+
+        final String tsDate;
+        if (rotatable) {
+            Timestamp ts = new Timestamp(System.currentTimeMillis());
+            // yyyy-MM-dd
+            tsDate = ts.toString().substring(0, 10);
+        } else {
+            tsDate = "";
+        }
+
+        // 处理日志滚动
+
+        // 读写锁：
+        // - 公平性：读写锁支持非公平和公平的锁获取方式，非公平锁的吞吐量优于公平锁的吞吐量，默认构造的是非公平锁
+        // - 可重入：在线程获取读锁之后能够再次获取读锁，但是不能获取写锁，而线程在获取写锁之后能够再次获取写锁，同时也能获取读锁
+        // - 锁降级：线程获取写锁之后获取读锁，再释放写锁，这样实现了写锁变为读锁，也叫锁降级
+        writerLock.readLock().lock();
+        try {
+            // 如果当前日期与当前打开的日志日期不一致，则新创建日志文件
+            if (!tsDate.equals(date)) {
+                // 换到写锁，释放读锁（有读锁是不能获取写锁的）
+                writerLock.readLock().unlock();
+                writerLock.writeLock().lock();
+                try {
+
+                    // double check
+                    if (!tsDate.equals(date)) {
+                        // 关闭当前Writer
+                        closeWriter();
+
+                        date = tsDate;
+
+                        // 重新开启Writer
+                        openWriter();
+
+                        // 删除旧日志
+                        clean();
+                    }
+
+                } finally {
+                    // 锁降级
+                    writerLock.readLock().lock();
+                    writerLock.writeLock().unlock();
+                }
+            }
+
+            // 处理 LogRecord
+
+
+        } finally {
+            writerLock.readLock().unlock();
+        }
 
     }
 
@@ -78,6 +174,9 @@ public class FileHandler extends Handler {
 
         ClassLoader cl = ClassLoaderLogManager.getClassLoader();
 
+        if (rotatable == null) {
+            rotatable = Boolean.valueOf(getProperty(className + ".rotatable", "true"));
+        }
         if (directory == null) {
             directory = getProperty(className + ".directory", "logs");
         }
@@ -129,6 +228,119 @@ public class FileHandler extends Handler {
                 // Ignore
             }
         }
+
+        // 日志格式化 formatter
+        String formatterName = getProperty(className + ".formatter", null);
+        if (formatterName != null) {
+            try {
+                setFormatter((Formatter) cl.loadClass(formatterName).getConstructor().newInstance());
+            } catch (Exception e) {
+                // Ignore and fallback to defaults
+                setFormatter(new OneLineSimpleFormatter());
+            }
+        } else {
+            setFormatter(new OneLineSimpleFormatter());
+        }
+
+        // 设置异常管理器
+        setErrorManager(new ErrorManager());
+    }
+
+    private void openWriter() {
+        if (writer != null) {
+            return;
+        }
+
+
+        File dir = new File(directory);
+
+        // 创建文件夹（如果需要）
+        if (!dir.mkdirs() && !dir.isDirectory()) {
+            reportError("无法创建 [" + dir + "]", null, ErrorManager.OPEN_FAILURE);
+            writer = null;
+            return;
+        }
+
+        // 打开当前日志
+        writerLock.writeLock().lock();
+        FileOutputStream fos = null;
+        OutputStream os = null;
+        try {
+            if (writer != null) {
+                return;
+            }
+
+            File pathName = new File(dir.getAbsoluteFile(), prefix + (rotatable ? date : "") + suffix);
+            String encoding = getEncoding();
+
+            fos = new FileOutputStream(pathName, true);
+            os = bufferSize > 0 ? new BufferedOutputStream(fos, bufferSize) : fos;
+
+            writer = new PrintWriter(os, false, Charset.forName(encoding));
+
+            writer.write(getFormatter().getHead(this));
+
+        } catch (FileNotFoundException e) {
+            reportError(null, e, ErrorManager.OPEN_FAILURE);
+            writer = null;
+            if (fos != null) {
+                try {
+                    fos.close();
+                } catch (IOException e1) {
+                    // Ignore
+                }
+            }
+            if (os != null) {
+                try {
+                    os.close();
+                } catch (IOException e1) {
+                    // Ignore
+                }
+            }
+        } finally {
+            writerLock.writeLock().unlock();
+        }
+    }
+
+    private void closeWriter() {
+        if (writer == null) {
+            return;
+        }
+
+        // 加可重入写锁，防止别的地方也在调研closeWriter
+        writerLock.writeLock().lock();
+        try {
+            if (writer == null) {
+                return;
+            }
+
+            // 写一个结尾
+            writer.write(getFormatter().getTail(this));
+            writer.flush();
+            writer.close();
+            writer = null;
+            date = null;
+        } catch (Exception e) {
+            reportError(null, e, ErrorManager.CLOSE_FAILURE);
+        } finally {
+            writerLock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * 清理日志
+     */
+    private void clean() {
+        // todo impl
+    }
+
+    /**
+     * 获取 可删除的日志目录
+     */
+    private DirectoryStream<Path> streamFilesForDelete() {
+        LocalDate maxDaysOffset = LocalDate.now().minus(maxDays.intValue(), ChronoUnit.DAYS);
+        // todo impl
+        return null;
     }
 
     private String getProperty(String name, String defaultValue) {

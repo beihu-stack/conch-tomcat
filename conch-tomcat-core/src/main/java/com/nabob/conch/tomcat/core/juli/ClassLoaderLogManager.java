@@ -101,6 +101,11 @@ public class ClassLoaderLogManager extends LogManager {
     /**
      * 覆盖 addLogger 方法
      * <p>
+     * 代码里面 Logger.getLogger(name) 时，会调用LogManager.getLogger(name), 如果没有该name的Logger对象，创建Logger.并会调用 LogManager.addLogger(Logger)
+     * {@link Logger#getLogger(String)}
+     * {@link LogManager#addLogger(java.util.logging.Logger)} ClassLoaderLogManager重新该方法
+     *
+     * <p>
      * synchronized 线程安全的，必须
      * 原LogManager的addLogger内部也使用了synchronized以保障LogManager的线程安全
      */
