@@ -114,11 +114,17 @@ public class FileHandler extends Handler {
         // - 公平性：读写锁支持非公平和公平的锁获取方式，非公平锁的吞吐量优于公平锁的吞吐量，默认构造的是非公平锁
         // - 可重入：在线程获取读锁之后能够再次获取读锁，但是不能获取写锁，而线程在获取写锁之后能够再次获取写锁，同时也能获取读锁
         // - 锁降级：线程获取写锁之后获取读锁，再释放写锁，这样实现了写锁变为读锁，也叫锁降级
+        // 使用场景:
+        // - 适合读多写少（存在写锁，则读锁不能使用）
+        //      - 读锁ReentrantReadWriteLock.ReadLock可以被多个线程同时持有, 所以并发能力很高
+        //      - 写锁ReentrantReadWriteLock.WriteLock是独占锁, 在一个线程持有写锁时候, 其他线程都不能在抢占, 包含抢占读锁都会阻塞
+        // 总结：读读并发、读写互斥、写写互斥
+        // 参考：https://www.cnblogs.com/mikechenshare/p/16743733.html
         writerLock.readLock().lock();
         try {
             // 如果当前日期与当前打开的日志日期不一致，则新创建日志文件
             if (!tsDate.equals(date)) {
-                // 换到写锁，释放读锁（有读锁是不能获取写锁的）
+                // 锁升级 换到写锁，释放读锁（有读锁是不能获取写锁的）
                 writerLock.readLock().unlock();
                 writerLock.writeLock().lock();
                 try {
@@ -145,8 +151,29 @@ public class FileHandler extends Handler {
             }
 
             // 处理 LogRecord
+            // 格式化
+            String result = null;
+            try {
+                result = getFormatter().format(record);
+            } catch (Exception e) {
+                reportError(null, e, ErrorManager.FORMAT_FAILURE);
+                return;
+            }
 
-
+            // 写盘 - 多线程时，PrinterWriter使用了父类的lock进行同步操作
+            try {
+                if (writer != null) {
+                    writer.write(result);
+                    if (bufferSize < 0) {
+                        writer.flush();
+                    }
+                } else {
+                    reportError("FileHandler is closed or not yet initialized, unable to log [" + result + "]", null,
+                        ErrorManager.WRITE_FAILURE);
+                }
+            } catch (Exception e) {
+                reportError(null, e, ErrorManager.WRITE_FAILURE);
+            }
         } finally {
             writerLock.readLock().unlock();
         }
@@ -166,6 +193,8 @@ public class FileHandler extends Handler {
     /**
      * 配置
      * - 读取配置文件
+     * <p>
+     * 套路：使用读配置文件方式，来装配Handler（给Handler定制特殊的配置）
      */
     private void configure() {
 
