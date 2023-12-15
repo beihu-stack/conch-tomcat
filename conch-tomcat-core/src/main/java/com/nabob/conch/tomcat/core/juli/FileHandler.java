@@ -10,10 +10,16 @@ import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
 import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.ErrorManager;
@@ -36,6 +42,9 @@ public class FileHandler extends Handler {
     // 永久
     public static final int DEFAULT_MAX_DAYS = -1;
     public static final int DEFAULT_BUFFER_SIZE = -1;
+
+    private static final ExecutorService DELETE_FILES_SERVICE = Executors
+        .newSingleThreadExecutor(new FileHandlerThreadFactory("FileHandlerLogFilesCleaner-"));
 
     /**
      * 日志是否可滚动
@@ -182,12 +191,22 @@ public class FileHandler extends Handler {
 
     @Override
     public void flush() {
-
+        writerLock.readLock().lock();
+        try {
+            if (writer == null) {
+                return;
+            }
+            writer.flush();
+        } catch (Exception e) {
+            reportError(null, e, ErrorManager.FLUSH_FAILURE);
+        } finally {
+            writerLock.readLock().unlock();
+        }
     }
 
     @Override
     public void close() throws SecurityException {
-
+        closeWriter();
     }
 
     /**
@@ -360,16 +379,43 @@ public class FileHandler extends Handler {
      * 清理日志
      */
     private void clean() {
-        // todo impl
+        if (maxDays <= 0 || Files.notExists(getDirectoryAsPath())) {
+            return;
+        }
+
+        DELETE_FILES_SERVICE.execute(() -> {
+            try (DirectoryStream<Path> files = streamFilesForDelete()){
+                for (Path file : files) {
+                    Files.delete(file);
+                }
+            } catch (Exception e) {
+                reportError("Unable to delete log files older than [" + maxDays + "] days", null,
+                    ErrorManager.GENERIC_FAILURE);
+            }
+        });
+
     }
 
     /**
-     * 获取 可删除的日志目录
+     * 获取 可删除的 日志文件 - DirectoryStream 实现了 Iterable 迭代器
      */
-    private DirectoryStream<Path> streamFilesForDelete() {
-        LocalDate maxDaysOffset = LocalDate.now().minus(maxDays.intValue(), ChronoUnit.DAYS);
-        // todo impl
-        return null;
+    private DirectoryStream<Path> streamFilesForDelete() throws IOException {
+        // 最大保存日期时间=当前时间-最大保存时间 （maxDaysOffset = now - maxDays）
+        LocalDate maxDaysOffset = LocalDate.now().minus(maxDays, ChronoUnit.DAYS);
+        // 获取日志目录下的文件流，过滤出需要的删除的文件
+        return Files.newDirectoryStream(getDirectoryAsPath(), new DirectoryStream.Filter<Path>() {
+            @Override
+            public boolean accept(Path path) throws IOException {
+                boolean result = false;
+                String date = obtainDateFromPath(path);
+                if (date != null) {
+                    LocalDate dateFromFile = LocalDate.from(DateTimeFormatter.ISO_LOCAL_DATE.parse(date));
+                    // 日志的时间 小于 最大保存日期时间
+                    result = dateFromFile.isBefore(maxDaysOffset);
+                }
+                return result;
+            }
+        });
     }
 
     private String getProperty(String name, String defaultValue) {
@@ -380,5 +426,52 @@ public class FileHandler extends Handler {
             value = value.trim();
         }
         return value;
+    }
+
+    private Path getDirectoryAsPath() {
+        return Path.of(directory);
+    }
+
+    /**
+     * 从文件名获取日志日期
+     */
+    private String obtainDateFromPath(Path path) {
+        Path fileName = path.getFileName();
+        if (fileName == null) {
+            return null;
+        }
+        String date = fileName.toString();
+        if (pattern.matcher(date).matches()) {
+            date = date.substring(prefix.length());
+            return date.substring(0, date.length() - suffix.length());
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * 创建 FileHandler 的 ThreadFactory
+     * <p>
+     * 支持名称 + 守护进程
+     */
+    protected static final class FileHandlerThreadFactory implements ThreadFactory {
+        private final String namePrefix;
+
+        private final ThreadGroup group;
+
+        private final AtomicInteger threadNumber = new AtomicInteger(1);
+
+        public FileHandlerThreadFactory(String namePrefix) {
+            this.namePrefix = namePrefix;
+            this.group = Thread.currentThread().getThreadGroup();
+        }
+
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread thread = new Thread(group, r, namePrefix + threadNumber.getAndIncrement());
+            thread.setContextClassLoader(FileHandlerThreadFactory.class.getClassLoader());
+            thread.setDaemon(true);
+            return thread;
+        }
     }
 }
