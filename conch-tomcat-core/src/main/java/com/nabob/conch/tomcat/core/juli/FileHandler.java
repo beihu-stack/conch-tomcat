@@ -393,7 +393,6 @@ public class FileHandler extends Handler {
                     ErrorManager.GENERIC_FAILURE);
             }
         });
-
     }
 
     /**
