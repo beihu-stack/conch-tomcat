@@ -204,6 +204,13 @@ public class FileHandler extends Handler {
         }
     }
 
+    /**
+     * 直接开启，可便于测试
+     */
+    public void open() {
+        openWriter();
+    }
+
     @Override
     public void close() throws SecurityException {
         closeWriter();
