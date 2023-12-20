@@ -36,7 +36,7 @@ public class OneLineSimpleFormatter extends Formatter {
         StringBuilder sb = new StringBuilder();
 
         // 日期
-        sb.append(timeStampToString(record.getMillis(), "dd-MMM-yyyy HH:mm:ss.SSS"));
+        sb.append(timeStampToString(record.getMillis(), "dd-MM-yyyy HH:mm:ss.SSS"));
 
         // 日志级别
         sb.append(' ');
