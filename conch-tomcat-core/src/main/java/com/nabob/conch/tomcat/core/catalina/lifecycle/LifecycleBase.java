@@ -70,11 +70,20 @@ public abstract class LifecycleBase implements Lifecycle {
         }
 
         try {
+            // 设置为 初始化中
+            setStateInternal(LifecycleState.INITIALIZING, null, false);
 
+            // 模版初始化方法
+            initInternal();
+
+            // 设置为 初始化完成
+            setStateInternal(LifecycleState.INITIALIZED, null, false);
         } catch (Throwable t) {
             handleSubClassException(t, "");
         }
     }
+
+    protected abstract void initInternal() throws LifecycleException;
 
     // private
 
