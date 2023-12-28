@@ -6,7 +6,6 @@ import com.nabob.conch.tomcat.core.tomcat.i18n.StringManager;
 import com.nabob.conch.tomcat.core.tomcat.util.ExceptionUtils;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -56,7 +55,7 @@ public abstract class LifecycleBase implements Lifecycle {
     /**
      * fire 生命周期事件
      */
-    protected void fireLifecycleEvent(String type, Objects data) {
+    protected void fireLifecycleEvent(String type, Object data) {
         LifecycleEvent event = new LifecycleEvent(this, type, data);
         for (LifecycleListener listener : lifecycleListeners) {
             listener.lifecycleEvent(event);
@@ -79,11 +78,84 @@ public abstract class LifecycleBase implements Lifecycle {
             // 设置为 初始化完成
             setStateInternal(LifecycleState.INITIALIZED, null, false);
         } catch (Throwable t) {
-            handleSubClassException(t, "");
+            handleSubClassException(t, "lifecycleBase.initFail");
         }
     }
 
     protected abstract void initInternal() throws LifecycleException;
+
+    /**
+     * start 如果 未 init ，则先触发init
+     */
+    @Override
+    public final synchronized void start() throws LifecycleException {
+        // 已经start判断
+        if (LifecycleState.STARTING_PREP.equals(state) || LifecycleState.STARTING.equals(state) || LifecycleState.STARTED.equals(state)) {
+            log.warn("lifecycleBase.alreadyStarted");
+            return;
+        }
+
+        // 未初始化
+        if (LifecycleState.NEW.equals(state)) {
+            init();
+        }
+        // 失败了
+        else if (LifecycleState.FAILED.equals(state)) {
+            stop();
+        }
+        // 如果状态不是初始化完成或者已停止，则不可发起start
+        else if (!state.equals(LifecycleState.INITIALIZED) && !state.equals(LifecycleState.STOPPED)) {
+            invalidTransition(BEFORE_START_EVENT);
+            return;
+        }
+
+        try {
+            // 设置为 启动前
+            setStateInternal(LifecycleState.STARTING_PREP, null, false);
+
+            // 模版启动方法：内部必须设置状态为 LifecycleState.STARTING
+            startInternal();
+
+            // 如果启动失败
+            if (state.equals(LifecycleState.FAILED)) {
+                stop();
+            }
+            // 未设置 启动中 状态
+            else if (!state.equals(LifecycleState.STARTING)) {
+                invalidTransition(AFTER_START_EVENT);
+            }
+            // 启动成功
+            else {
+                // 设置为 启动完成
+                setStateInternal(LifecycleState.STARTED, null, false);
+            }
+        } catch (Throwable t) {
+            handleSubClassException(t, "lifecycleBase.startFail");
+        }
+
+    }
+
+    protected abstract void startInternal() throws LifecycleException;
+
+    @Override
+    public LifecycleState getState() {
+        return state;
+    }
+
+
+    /**
+     * 提供给子类进行状态设置
+     */
+    protected synchronized void setState(LifecycleState newState) throws LifecycleException {
+        setStateInternal(newState, null, true);
+    }
+
+    /**
+     * 提供给子类进行状态设置
+     */
+    protected synchronized void setState(LifecycleState newState, Object data) throws LifecycleException {
+        setStateInternal(newState, data, true);
+    }
 
     // private
 
@@ -94,7 +166,7 @@ public abstract class LifecycleBase implements Lifecycle {
      * @param data     新状态对应的事件需要publish的事件数据
      * @param check    是否check状态转换流转合法性
      */
-    private synchronized void setStateInternal(LifecycleState newState, Objects data, boolean check) throws LifecycleException {
+    private synchronized void setStateInternal(LifecycleState newState, Object data, boolean check) throws LifecycleException {
         log.debug(sm.getString("lifecycleBase.setState", this, state));
 
         if (newState == null) {
