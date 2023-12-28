@@ -3,6 +3,7 @@ package com.nabob.conch.tomcat.core.catalina.lifecycle;
 import com.nabob.conch.tomcat.core.juli.logging.Log;
 import com.nabob.conch.tomcat.core.juli.logging.LogFactory;
 import com.nabob.conch.tomcat.core.tomcat.i18n.StringManager;
+import com.nabob.conch.tomcat.core.tomcat.util.ExceptionUtils;
 
 import java.util.List;
 import java.util.Objects;
@@ -71,7 +72,7 @@ public abstract class LifecycleBase implements Lifecycle {
         try {
 
         } catch (Throwable t) {
-
+            handleSubClassException(t, "");
         }
     }
 
@@ -123,5 +124,24 @@ public abstract class LifecycleBase implements Lifecycle {
     private void invalidTransition(String type) throws LifecycleException {
         String msg = sm.getString("lifecycleBase.invalidTransition", type, toString(), state);
         throw new LifecycleException(msg);
+    }
+
+    /**
+     * 处理子类的异常
+     *
+     * @param t       异常
+     * @param message 异常提示
+     * @throws LifecycleException LifecycleException
+     */
+    private void handleSubClassException(Throwable t, String message) throws LifecycleException {
+        // 设置状态为失败
+        setStateInternal(LifecycleState.FAILED, null, false);
+
+        // 抛异常
+        ExceptionUtils.handleThrowable(t);
+        if (!(t instanceof LifecycleException)) {
+            throw new LifecycleException(message, t);
+        }
+        throw (LifecycleException) t;
     }
 }
