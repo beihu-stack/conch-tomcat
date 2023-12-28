@@ -13,19 +13,21 @@ public final class LifecycleEvent extends EventObject {
     private static final long serialVersionUID = 1L;
 
     /**
+     * 事件类型
+     *
+     * @see LifecycleEventType
+     */
+    private String type;
+
+    /**
      * 数据
      */
     private Object data;
 
-    /**
-     * 事件类型
-     */
-    private String type;
-
-    public LifecycleEvent(Lifecycle lifecycle, Object data, String type) {
+    public LifecycleEvent(Lifecycle lifecycle, String type, Object data) {
         super(lifecycle);
-        this.data = data;
         this.type = type;
+        this.data = data;
     }
 
     public Object getData() {

@@ -6,26 +6,51 @@ package com.nabob.conch.tomcat.core.catalina.lifecycle;
  * @author Adam
  * @since 2023/12/5
  */
-public interface Lifecycle {
+public interface Lifecycle extends LifecycleEventType {
+
+    // Lifecycle
 
     /**
      * 初始化
      */
-    void init();
+    void init() throws LifecycleException;
 
     /**
      * 开始
      */
-    void start();
+    void start() throws LifecycleException;
 
     /**
      * 停止
      */
-    void stop();
+    void stop() throws LifecycleException;
 
     /**
      * 销毁
      */
-    void destroy();
+    void destroy() throws LifecycleException;
 
+    // LifecycleListener
+
+    /**
+     * 添加 生命周期监听器
+     */
+    void addLifecycleListener(LifecycleListener listener);
+
+    /**
+     * 查询 生命周期监听器
+     */
+    LifecycleListener[] findLifecycleListeners();
+
+    /**
+     * 移除 生命周期监听器
+     */
+    void removeLifecycleListener(LifecycleListener listener);
+
+    // LifecycleState
+
+    /**
+     * 获取状态
+     */
+    LifecycleState getState();
 }

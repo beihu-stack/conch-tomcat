@@ -42,7 +42,7 @@ public class StringManager {
     }
 
     private StringManager(String packageName, Locale locale) {
-        String bundleName = packageName + ".Local";
+        String bundleName = packageName + ".LocalStrings";
 
         ResourceBundle resBnd = null;
         try {
