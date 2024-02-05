@@ -138,6 +138,11 @@ public abstract class LifecycleBase implements Lifecycle {
     protected abstract void startInternal() throws LifecycleException;
 
     @Override
+    public final synchronized void stop() throws LifecycleException {
+
+    }
+
+    @Override
     public LifecycleState getState() {
         return state;
     }
